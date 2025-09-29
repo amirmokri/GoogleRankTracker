@@ -1,0 +1,17 @@
+# GoogleRankTracker Dependencies
+# Core web scraping and parsing
+requests==2.32.5
+beautifulsoup4==4.14.0
+lxml==6.0.2
+urllib3==2.5.0
+fake-useragent==2.2.0
+
+# Selenium browser automation
+selenium==4.35.0
+webdriver-manager==4.0.2
+
+# International domain name support
+idna==3.10
+
+# Additional utilities
+python-dotenv==1.1.1
