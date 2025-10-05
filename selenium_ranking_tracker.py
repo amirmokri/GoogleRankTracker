@@ -59,6 +59,9 @@ class SeleniumRankingTracker:
             self._ensure_csv_header()
         except Exception as e:
             self.logger.warning(f"Could not pre-create CSV header: {e}")
+
+        # Random seed per run to vary behavior
+        self._human_seed = random.randint(1, 10_000_000)
     
     def setup_logging(self):
         """Setup logging configuration."""
@@ -110,9 +113,18 @@ class SeleniumRankingTracker:
         # More realistic user agent
         chrome_options.add_argument('--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36')
         
-        # Window size and position
-        chrome_options.add_argument('--window-size=1366,768')
+        # Window size and position (randomized within a small range)
+        try:
+            base_w, base_h = 1280, 720
+            delta_w = random.randint(-120, 160)
+            delta_h = random.randint(-80, 120)
+            chrome_options.add_argument(f'--window-size={base_w + delta_w},{base_h + delta_h}')
+        except Exception:
+            chrome_options.add_argument('--window-size=1366,768')
         chrome_options.add_argument('--window-position=100,100')
+
+        # Language headers to match requested hl
+        chrome_options.add_argument('--lang=fa,en-US;q=0.9')
         
         # Allow images and cookies so CAPTCHAs can load properly
         prefs = {
@@ -146,6 +158,14 @@ class SeleniumRankingTracker:
             
             # Execute script to remove webdriver property
             self.driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+
+            # Mimic real navigator properties
+            self.driver.execute_script("""
+                Object.defineProperty(navigator, 'languages', {get: () => ['fa', 'en-US', 'en']});
+                Object.defineProperty(navigator, 'platform', {get: () => 'Win32'});
+                Object.defineProperty(navigator, 'hardwareConcurrency', {get: () => 8});
+                Object.defineProperty(navigator, 'deviceMemory', {get: () => 8});
+            """)
             
             self.logger.info("Chrome WebDriver initialized successfully")
             
@@ -191,6 +211,7 @@ class SeleniumRankingTracker:
                 
                 # Wait for page to load
                 time.sleep(random.uniform(self.min_delay, self.max_delay))
+                self._humanize_page_interaction()
 
                 # Handle Google consent banner if present (first page attempts)
                 try:
@@ -253,6 +274,7 @@ class SeleniumRankingTracker:
                 
                 # Random delay between pages
                 time.sleep(random.uniform(self.min_delay, self.max_delay))
+                self._humanize_between_pages()
                 
             except Exception as e:
                 self.logger.error(f"Error searching page {page + 1}: {e}")
@@ -270,6 +292,51 @@ class SeleniumRankingTracker:
                 self.logger.warning(f"Navigation error (attempt {attempt}/{retries}) to {url}: {e}")
                 time.sleep(2 * attempt)
         return False
+
+    # --------------------------
+    # Humanization helpers
+    # --------------------------
+    def _humanize_page_interaction(self) -> None:
+        """Simulate small human interactions on the page to reduce automation signals."""
+        try:
+            # Random micro-pauses
+            time.sleep(random.uniform(0.2, 0.6))
+            # Occasional small scrolls
+            if random.random() < 0.85:
+                scrolls = random.randint(1, 3)
+                for _ in range(scrolls):
+                    dy = random.randint(150, 600)
+                    self.driver.execute_script("window.scrollBy(0, arguments[0]);", dy)
+                    time.sleep(random.uniform(0.15, 0.5))
+                # Scroll up a bit
+                if random.random() < 0.4:
+                    dy_up = random.randint(80, 200)
+                    self.driver.execute_script("window.scrollBy(0, arguments[0]);", -dy_up)
+                    time.sleep(random.uniform(0.1, 0.3))
+            # Occasional hover over h3
+            if random.random() < 0.45:
+                try:
+                    h3s = self.driver.find_elements(By.TAG_NAME, 'h3')
+                    if h3s:
+                        target = random.choice(h3s)
+                        self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", target)
+                        time.sleep(random.uniform(0.2, 0.5))
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+    def _humanize_between_pages(self) -> None:
+        """Simulate human think time and small movements between pages."""
+        try:
+            # Think time
+            time.sleep(random.uniform(0.4, 1.0))
+            # Minor jitter scroll
+            if random.random() < 0.6:
+                self.driver.execute_script("window.scrollTo(0, 0);")
+                time.sleep(random.uniform(0.1, 0.3))
+        except Exception:
+            pass
     
     def is_anti_bot_page(self) -> bool:
         """Check if we're on an anti-bot page."""
@@ -295,48 +362,130 @@ class SeleniumRankingTracker:
     def is_captcha_page(self) -> bool:
         """Check if we're on a captcha page."""
         try:
+            # Fast textual signals
             captcha_indicators = [
                 "captcha",
                 "robot verification",
                 "verify you are human",
                 "security check",
-                "reCAPTCHA",
+                "recaptcha",
                 "select all images",
-                "I'm not a robot"
+                "i'm not a robot",
+                "are you a robot"
             ]
-            
             page_text = self.driver.page_source.lower()
-            return any(indicator.lower() in page_text for indicator in captcha_indicators)
+            if any(indicator in page_text for indicator in captcha_indicators):
+                return True
+
+            # Structural signals: presence of recaptcha/turnstile/hcaptcha iframes/elements
+            try:
+                iframes = self.driver.find_elements(By.TAG_NAME, 'iframe')
+                for f in iframes:
+                    title = (f.get_attribute('title') or '').lower()
+                    src = (f.get_attribute('src') or '').lower()
+                    if ('recaptcha' in title) or ('recaptcha' in src):
+                        return True
+                # Common widget elements
+                widget_candidates = [
+                    (By.ID, 'captcha'), (By.ID, 'g-recaptcha'), (By.CLASS_NAME, 'g-recaptcha'),
+                    (By.CSS_SELECTOR, 'div[role="dialog"][aria-modal="true"]')
+                ]
+                for by, sel in widget_candidates:
+                    els = self.driver.find_elements(by, sel)
+                    if els:
+                        return True
+            except Exception:
+                pass
+            return False
         except:
             return False
     
     def handle_captcha(self) -> bool:
-        """Handle captcha page by waiting for user interaction."""
+        """Handle captcha page by interacting with checkbox or guiding manual solving.
+
+        Strategy:
+        1) Try to click the reCAPTCHA checkbox iframe if present.
+        2) If a challenge dialog appears, wait while user solves it and poll until it disappears.
+        3) Always switch back to default content and confirm captcha is cleared.
+        """
         try:
             if not self.is_captcha_page():
                 return False
             
-            self.logger.warning("CAPTCHA detected! Please solve it manually...")
-            print("\n" + "="*60)
-            print("🚨 CAPTCHA DETECTED!")
-            print("="*60)
-            print("A captcha page has appeared. Please:")
-            print("1. Solve the captcha manually in the browser window")
-            print("2. Complete any verification steps")
-            print("3. Press ENTER here when done")
-            print("="*60)
-            
-            input("Press ENTER after solving the captcha...")
-            
-            # Wait a bit more for the page to load after captcha
-            time.sleep(3)
-            
-            # Check if we're still on a captcha page
+            self.logger.warning("CAPTCHA detected! Attempting to handle...")
+
+            # Always start from default content
+            try:
+                self.driver.switch_to.default_content()
+            except Exception:
+                pass
+
+            # Step 1: Try to click the checkbox if present
+            try:
+                checkbox_iframe = None
+                for f in self.driver.find_elements(By.TAG_NAME, 'iframe'):
+                    title = (f.get_attribute('title') or '').lower()
+                    src = (f.get_attribute('src') or '').lower()
+                    if 'recaptcha' in title or 'recaptcha' in src:
+                        # Heuristic: the checkbox frame usually has title containing "i'm not a robot"
+                        if "i'm not a robot" in title or 'anchor' in src:
+                            checkbox_iframe = f
+                            break
+                if checkbox_iframe is None:
+                    # Fallback: pick the first recaptcha iframe if only one exists
+                    recaptcha_frames = [f for f in self.driver.find_elements(By.TAG_NAME, 'iframe')
+                                        if 'recaptcha' in ((f.get_attribute('title') or '').lower() + (f.get_attribute('src') or '').lower())]
+                    if len(recaptcha_frames) == 1:
+                        checkbox_iframe = recaptcha_frames[0]
+
+                if checkbox_iframe is not None:
+                    self.driver.switch_to.frame(checkbox_iframe)
+                    try:
+                        anchor = WebDriverWait(self.driver, 10).until(
+                            EC.element_to_be_clickable((By.ID, 'recaptcha-anchor'))
+                        )
+                        anchor.click()
+                        time.sleep(1.5)
+                    except Exception as e:
+                        self.logger.debug(f"Checkbox click failed or not present: {e}")
+                    finally:
+                        self.driver.switch_to.default_content()
+            except Exception as e:
+                self.logger.debug(f"Error trying checkbox iframe: {e}")
+
+            # Step 2: If a challenge dialog appears, guide user and poll until cleared
             if self.is_captcha_page():
-                self.logger.warning("Still on captcha page, please try again")
+                print("\n" + "="*60)
+                print("🚨 CAPTCHA CHALLENGE DETECTED!")
+                print("="*60)
+                print("If you see an image challenge, solve it in the browser.")
+                print("- Keep the Chrome window visible (not minimized)")
+                print("- Solve the tiles; some challenges auto-verify without a button")
+                print("- When results load, come back here")
+                print("Press ENTER to start polling for completion...")
+                try:
+                    input()
+                except Exception:
+                    pass
+
+                # Poll until captcha page is gone or timeout
+                end_time = time.time() + 180  # up to 3 minutes for complex challenges
+                while time.time() < end_time:
+                    try:
+                        self.driver.switch_to.default_content()
+                    except Exception:
+                        pass
+                    if not self.is_captcha_page():
+                        self.logger.info("Captcha cleared.")
+                        break
+                    time.sleep(2.0)
+
+            # Final confirmation and settle time
+            self.driver.switch_to.default_content()
+            if self.is_captcha_page():
+                self.logger.warning("Captcha still present after handling.")
                 return False
-            
-            self.logger.info("Captcha solved successfully!")
+            time.sleep(2)
             return True
             
         except Exception as e:

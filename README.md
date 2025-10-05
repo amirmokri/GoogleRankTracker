@@ -45,7 +45,7 @@ pip install -r requirements.txt
 
 ### 4. Verify Installation
 ```bash
-python test_selenium_tracker.py
+python selenium_ranking_tracker.py --help
 ```
 
 ## 📖 Usage
@@ -144,15 +144,9 @@ python selenium_ranking_tracker.py --url yourwebsite.com --debug
 ```
 GoogleRankTracker/
 ├── selenium_ranking_tracker.py    # Main tracker script
-├── alternative_ranking_tracker.py # Alternative implementation
 ├── requirements.txt               # Python dependencies
 ├── config.json                   # Configuration settings
 ├── keywords.txt                  # Keywords to track
-├── test_selenium_tracker.py      # Installation test
-├── test_captcha_handling.py      # Captcha test
-├── install_selenium_solution.bat # Windows installer
-├── install_selenium_solution.sh  # Linux/Mac installer
-├── CAPTCHA_SOLUTION.md           # Captcha handling guide
 ├── output/                       # Results directory
 │   └── result.csv               # Generated results
 └── README.md                    # This file
